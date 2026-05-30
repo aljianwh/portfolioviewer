@@ -6,7 +6,10 @@ const state = {
   range: "all",
   trendKeys: ["netWorth"],
   search: "",
-  showZero: false
+  showZero: false,
+  quoteTimer: null,
+  quoteRefreshMs: 5 * 60 * 1000,
+  lastQuoteFetch: 0
 };
 
 const titles = { overview: "總覽", assets: "資產", investments: "投資", trends: "趨勢" };
@@ -159,21 +162,49 @@ async function loadPortfolio() {
   render();
 }
 
-async function refreshQuotes() {
-  $("#quoteStatus").textContent = "更新中...";
+function quoteIntervalMinutes() {
+  return Math.max(1, Number(state.portfolio?.settings?.refreshMinutes || 5));
+}
+
+function quoteStatusText(prefix, time = null) {
+  const suffix = `每 ${quoteIntervalMinutes()} 分鐘自動更新`;
+  return time ? `${prefix} ${time} · ${suffix}` : `${prefix} · ${suffix}`;
+}
+
+async function refreshQuotes({ silent = false } = {}) {
+  if (!state.portfolio) return;
+  if (!silent) $("#quoteStatus").textContent = quoteStatusText("更新中...");
   const symbols = state.portfolio.assets
     .filter((asset) => asset.type !== "cash" && asset.quoteSymbol)
     .map((asset) => asset.quoteSymbol);
   try {
     const payload = await api(`/api/quotes?symbols=${encodeURIComponent([...new Set(symbols)].join(","))}`);
     state.quotes = new Map(payload.quotes.map((quote) => [quote.quoteSymbol, quote]));
+    state.lastQuoteFetch = Date.now();
     const time = new Date(payload.fetchedAt).toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" });
-    $("#quoteStatus").textContent = payload.quotes.length ? `已更新 ${time}` : "使用匯入價格";
+    $("#quoteStatus").textContent = payload.quotes.length ? quoteStatusText("已更新", time) : quoteStatusText("使用匯入價格");
   } catch (error) {
-    $("#quoteStatus").textContent = "報價暫不可用";
+    $("#quoteStatus").textContent = quoteStatusText("報價暫不可用");
     console.warn(error);
   }
   render();
+}
+
+function startQuoteAutoRefresh() {
+  state.quoteRefreshMs = quoteIntervalMinutes() * 60 * 1000;
+  if (state.quoteTimer) clearInterval(state.quoteTimer);
+  state.quoteTimer = setInterval(() => {
+    if (document.visibilityState === "visible" && navigator.onLine !== false) {
+      refreshQuotes({ silent: true });
+    }
+  }, state.quoteRefreshMs);
+  $("#quoteStatus").textContent = quoteStatusText("自動更新已啟用");
+}
+
+function refreshQuotesIfStale() {
+  if (!state.lastQuoteFetch || Date.now() - state.lastQuoteFetch > Math.min(state.quoteRefreshMs, 60 * 1000)) {
+    refreshQuotes({ silent: true });
+  }
 }
 
 function registerServiceWorker() {
@@ -684,7 +715,7 @@ function accountFromForm() {
 }
 
 function wireEvents() {
-  $("#refreshQuotes").addEventListener("click", refreshQuotes);
+  $("#refreshQuotes").addEventListener("click", () => refreshQuotes());
   $("#exportData").addEventListener("click", () => {
     const blob = new Blob([JSON.stringify(state.portfolio, null, 2)], { type: "application/json" });
     const link = document.createElement("a");
@@ -847,10 +878,15 @@ function wireEvents() {
     renderInvestmentChart();
     drawTrendChart();
   });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") refreshQuotesIfStale();
+  });
+  window.addEventListener("focus", refreshQuotesIfStale);
+  window.addEventListener("online", () => refreshQuotes({ silent: true }));
 }
 
 wireEvents();
 registerServiceWorker();
 await loadPortfolio();
+startQuoteAutoRefresh();
 await refreshQuotes();
-setInterval(refreshQuotes, Number(state.portfolio.settings?.refreshMinutes || 5) * 60 * 1000);
