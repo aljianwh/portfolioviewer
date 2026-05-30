@@ -99,6 +99,57 @@ function assetDayChange(asset) {
   return Number(asset.shares || 0) * Number(quote.change || 0) * fxToTwd(asset.currency || "TWD");
 }
 
+function assetUnitChange(asset) {
+  const quote = state.quotes.get(asset.quoteSymbol);
+  if (!quote || quote.change == null) {
+    const shares = Number(asset.shares || 0);
+    return shares ? Number(asset.dayChangeTwd || 0) / shares / fxToTwd(asset.currency || "TWD") : 0;
+  }
+  return Number(quote.change || 0);
+}
+
+function assetChangePct(asset) {
+  const quote = state.quotes.get(asset.quoteSymbol);
+  return quote?.changePct ?? asset.dayChangePct ?? 0;
+}
+
+function currencyCode(asset) {
+  return asset.currency || (asset.market === "TW" ? "TWD" : "USD");
+}
+
+function formatPriceByCurrency(value, currency) {
+  const digits = currency === "JPY" || currency === "TWD" ? 2 : 2;
+  return new Intl.NumberFormat("zh-TW", {
+    style: "currency",
+    currency: currency || "TWD",
+    maximumFractionDigits: digits
+  }).format(Number(value || 0));
+}
+
+function quoteDisplayName(asset) {
+  if (asset.market === "TW") return asset.name || asset.symbol.replace("TPE:", "");
+  if (asset.market === "US") return asset.symbol;
+  return asset.name || asset.symbol;
+}
+
+function quoteSubName(asset) {
+  if (asset.market === "TW") return asset.symbol.replace("TPE:", "");
+  if (asset.market === "US") return asset.name || asset.quoteSymbol || "";
+  return `${asset.market || asset.exchange || ""} ${asset.symbol}`;
+}
+
+function logoText(asset) {
+  const source = asset.market === "TW" ? (asset.name || asset.symbol) : asset.symbol;
+  const letters = String(source).replace(/^TPE:/, "").replace(/[^A-Za-z0-9\u4e00-\u9fff]/g, "");
+  return [...letters].slice(0, 2).join("").toUpperCase() || "?";
+}
+
+function logoColor(asset) {
+  const palette = ["#10231f", "#1f7a5a", "#3b6ea8", "#b8832f", "#7564a8", "#b94d63"];
+  const seed = [...String(asset.symbol)].reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  return palette[seed % palette.length];
+}
+
 function categoryValue(key) {
   const latest = latestHistory();
   return Number(latest[key] || 0);
@@ -365,8 +416,12 @@ function drawAccountRecordCharts() {
 function renderInvestments() {
   const assets = visibleInvestments();
   const total = assets.reduce((sum, asset) => sum + assetValue(asset), 0);
+  const dayChange = assets.reduce((sum, asset) => sum + assetDayChange(asset), 0);
+  const previous = total - dayChange;
+  const dayPct = previous ? dayChange / previous : 0;
   renderInvestmentChart(assets, total);
   $("#investmentCount").textContent = `${assets.length} 筆 / ${fmtMoney(total)}`;
+  renderPortfolioQuoteSummary(total, dayChange, dayPct);
   $("#txAsset").innerHTML = state.portfolio.assets
     .filter((asset) => asset.isInvestment !== false)
     .map((asset) => `<option value="${escapeHtml(asset.id)}">${escapeHtml(asset.symbol)} ${escapeHtml(asset.name)}</option>`)
@@ -374,23 +429,43 @@ function renderInvestments() {
   $("#holdingsBody").innerHTML = assets.map((asset) => {
     const value = assetValue(asset);
     const pnl = value - Number(asset.costBasisTwd || 0);
+    const unitChange = assetUnitChange(asset);
+    const changePct = assetChangePct(asset);
+    const changeClass = classFor(unitChange);
+    const currency = currencyCode(asset);
     return `
-      <tr>
-        <td><div class="symbol">${escapeHtml(asset.symbol)}</div><div class="subtle">${escapeHtml(asset.name)}</div></td>
-        <td>${escapeHtml(asset.market || asset.exchange || "")}</td>
-        <td>${escapeHtml(asset.assetClass || asset.investmentType || asset.type)}</td>
-        <td>${fmtNumber(asset.shares)}</td>
-        <td>${fmtNumber(assetPrice(asset))}</td>
-        <td>${fmtMoney(value)}</td>
-        <td>${fmtMoney(asset.costBasisTwd)}</td>
-        <td class="${classFor(pnl)}">${fmtMoney(pnl)}</td>
-        <td><div class="row-actions">
+      <article class="quote-row">
+        <div class="quote-main">
+          <div class="quote-logo" style="background:${logoColor(asset)}">${escapeHtml(logoText(asset))}</div>
+          <div class="quote-title">
+            <strong>${escapeHtml(quoteDisplayName(asset))}</strong>
+            <span>${escapeHtml(quoteSubName(asset))} · ${escapeHtml(asset.market || asset.exchange || "")}</span>
+          </div>
+        </div>
+        <div class="quote-cell"><strong>${escapeHtml(asset.assetClass || asset.investmentType || asset.type)}</strong><span>類型</span></div>
+        <div class="quote-cell"><strong>${fmtNumber(asset.shares)}</strong><span>持有</span></div>
+        <div class="quote-cell"><strong>${formatPriceByCurrency(assetPrice(asset), currency)}</strong><span>現價</span></div>
+        <div class="quote-cell"><strong>${fmtMoney(value)}</strong><span>現值</span></div>
+        <div class="quote-cell quote-change ${changeClass}">
+          <strong>${unitChange >= 0 ? "+" : ""}${formatPriceByCurrency(unitChange, currency)}</strong>
+          <span>${changePct >= 0 ? "+" : ""}${pct.format(changePct)}</span>
+        </div>
+        <div class="row-actions">
           <button title="編輯" data-edit-asset="${escapeHtml(asset.id)}">✎</button>
           <button title="刪除" data-delete-asset="${escapeHtml(asset.id)}">×</button>
-        </div></td>
-      </tr>`;
+        </div>
+      </article>`;
   }).join("");
   renderTransactions();
+}
+
+function renderPortfolioQuoteSummary(total, dayChange, dayPct) {
+  const changeClass = classFor(dayChange);
+  $("#portfolioQuoteSummary").innerHTML = `
+    <div class="quote-stat"><span>投資組合現值</span><strong>${fmtMoney(total)}</strong></div>
+    <div class="quote-stat"><span>今日漲跌</span><strong class="${changeClass}">${dayChange >= 0 ? "+" : ""}${fmtMoney(dayChange)}</strong></div>
+    <div class="quote-stat"><span>今日漲跌幅</span><strong class="${changeClass}">${dayPct >= 0 ? "+" : ""}${pct.format(dayPct)}</strong></div>
+    <div class="quote-stat"><span>報價狀態</span><strong>${escapeHtml($("#quoteStatus").textContent.split("·")[0].trim() || "自動更新")}</strong></div>`;
 }
 
 function renderInvestmentChart(assets = visibleInvestments(), total = assets.reduce((sum, asset) => sum + assetValue(asset), 0)) {
