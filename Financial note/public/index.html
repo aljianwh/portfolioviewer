@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#10231f">
+    <title>Financial Portfolio</title>
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" href="/icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/icon-192.png">
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="rail" aria-label="主要導覽">
+        <div class="brand-mark">FP</div>
+        <button class="nav active" data-view="overview" title="總覽">⌂<span>總覽</span></button>
+        <button class="nav" data-view="assets" title="資產">▦<span>資產</span></button>
+        <button class="nav" data-view="investments" title="投資">↗<span>投資</span></button>
+        <button class="nav" data-view="trends" title="趨勢">⌁<span>趨勢</span></button>
+      </aside>
+
+      <main>
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Net worth tracker</p>
+            <h1 id="pageTitle">總覽</h1>
+          </div>
+          <div class="header-actions">
+            <span id="quoteStatus" class="status-pill">尚未更新</span>
+            <button id="refreshQuotes" class="icon-button" title="更新報價" aria-label="更新報價">↻</button>
+            <button id="exportData" class="icon-button" title="匯出資料" aria-label="匯出資料">⇩</button>
+          </div>
+        </header>
+
+        <section id="overviewView" class="view active">
+          <section class="hero-panel">
+            <div>
+              <span class="label">淨資產</span>
+              <strong id="netWorthHero">--</strong>
+              <div class="mini-row">
+                <span id="monthLabel">--</span>
+                <span id="momBadge" class="delta">--</span>
+                <span id="yoyBadge" class="delta">--</span>
+              </div>
+            </div>
+            <canvas id="sparklineChart" width="520" height="180"></canvas>
+          </section>
+
+          <section class="metric-grid">
+            <article><span>淨資產</span><strong id="grossAssets">--</strong></article>
+            <article><span>投資資產</span><strong id="investmentAssets">--</strong></article>
+            <article><span>負債</span><strong id="liabilities">--</strong></article>
+            <article><span>月收入</span><strong id="monthlyIncome">--</strong></article>
+          </section>
+
+          <section class="split-layout">
+            <article class="panel">
+              <div class="panel-head">
+                <h2>淨資產配置</h2>
+                <span id="allocationTotal" class="subtle"></span>
+              </div>
+              <canvas id="allocationChart" width="360" height="260"></canvas>
+              <div id="allocationLegend" class="legend"></div>
+            </article>
+            <article class="panel">
+              <div class="panel-head">
+                <h2>分類價值</h2>
+                <button id="addAccount" class="primary-button">新增資產</button>
+              </div>
+              <div id="categoryCards" class="category-list"></div>
+            </article>
+          </section>
+        </section>
+
+        <section id="assetsView" class="view">
+          <section class="asset-chart-grid">
+            <article class="panel">
+              <div class="panel-head">
+                <h2>分類配置</h2>
+                <span id="assetCategoryTotal" class="subtle"></span>
+              </div>
+              <canvas id="assetCategoryChart" width="420" height="260"></canvas>
+              <div id="assetCategoryLegend" class="legend"></div>
+            </article>
+            <article class="panel">
+              <div class="panel-head">
+                <h2>帳戶/資產配置</h2>
+                <select id="accountPieGroup"></select>
+              </div>
+              <canvas id="accountChart" width="420" height="260"></canvas>
+              <div id="accountLegend" class="legend"></div>
+            </article>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2>最新資產現況</h2>
+              <span id="latestSnapshotLabel" class="subtle"></span>
+            </div>
+            <div id="latestSnapshot" class="snapshot-grid"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2>分類別資產管理</h2>
+              <div class="panel-actions">
+                <button id="syncWorkbook" class="secondary-button">從 Excel 同步</button>
+                <button id="addAccountSecondary" class="primary-button">新增資產</button>
+              </div>
+            </div>
+            <div id="accountsBody" class="accounts-list"></div>
+          </section>
+        </section>
+
+        <section id="investmentsView" class="view">
+          <section class="panel">
+            <div class="panel-head">
+              <h2>投資配置</h2>
+              <span id="investmentPieTotal" class="subtle"></span>
+            </div>
+            <canvas id="investmentChart" width="1080" height="280"></canvas>
+            <div id="investmentLegend" class="legend wide"></div>
+          </section>
+
+          <section class="toolbar-panel">
+            <div class="segmented" role="tablist">
+              <button class="segment active" data-investment-filter="all">全部</button>
+              <button class="segment" data-investment-filter="fund">基金</button>
+              <button class="segment" data-investment-filter="stock">股票</button>
+              <button class="segment" data-investment-filter="crypto">加密貨幣</button>
+            </div>
+            <div class="filters">
+              <input id="searchBox" type="search" placeholder="搜尋代號或名稱">
+              <label><input id="showZero" type="checkbox"> 零持倉</label>
+              <button id="addAsset" class="primary-button">新增投資</button>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2>投資組合</h2>
+              <span id="investmentCount" class="subtle"></span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>投資</th>
+                    <th>市場</th>
+                    <th>類型</th>
+                    <th>股數/單位</th>
+                    <th>現價</th>
+                    <th>現值 TWD</th>
+                    <th>成本 TWD</th>
+                    <th>損益</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="holdingsBody"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2>買賣紀錄</h2>
+            </div>
+            <form id="transactionForm" class="inline-form">
+              <select id="txAsset"></select>
+              <input id="txDate" type="date" required>
+              <input id="txShares" type="number" step="0.000001" placeholder="數量" required>
+              <input id="txPrice" type="number" step="0.000001" placeholder="成交價" required>
+              <input id="txFee" type="number" step="0.01" placeholder="費用">
+              <button class="primary-button">新增</button>
+            </form>
+            <div class="table-wrap compact">
+              <table>
+                <thead>
+                  <tr>
+                    <th>日期</th>
+                    <th>投資</th>
+                    <th>類型</th>
+                    <th>數量</th>
+                    <th>價格</th>
+                    <th>費用</th>
+                    <th>成本</th>
+                  </tr>
+                </thead>
+                <tbody id="transactionsBody"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <section id="trendsView" class="view">
+          <section class="panel">
+            <div class="panel-head">
+              <h2>每月變化</h2>
+              <div class="segmented small">
+                <button class="segment active" data-range="all">全部</button>
+                <button class="segment" data-range="24">24M</button>
+                <button class="segment" data-range="12">12M</button>
+              </div>
+            </div>
+            <div id="trendOptions" class="trend-options"></div>
+            <canvas id="trendChart" width="1080" height="420"></canvas>
+          </section>
+          <section class="panel">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>月份</th>
+                    <th>淨資產</th>
+                    <th>現金</th>
+                    <th>基金</th>
+                    <th>證券</th>
+                    <th>加密貨幣</th>
+                    <th>房屋資產</th>
+                    <th>負債</th>
+                  </tr>
+                </thead>
+                <tbody id="historyBody"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="assetDialog">
+      <form id="assetForm" method="dialog">
+        <h2 id="assetDialogTitle">新增投資</h2>
+        <input type="hidden" id="assetId">
+        <div class="form-grid">
+          <label>類型
+            <select id="assetType">
+              <option value="stock">股票</option>
+              <option value="fund">基金/ETF</option>
+              <option value="crypto">加密貨幣</option>
+            </select>
+          </label>
+          <label>市場
+            <select id="assetMarket">
+              <option value="TW">台股</option>
+              <option value="US">美股</option>
+              <option value="HK">港股</option>
+              <option value="JP">日股</option>
+              <option value="Crypto">加密貨幣</option>
+            </select>
+          </label>
+        </div>
+        <label>代號 <input id="assetSymbol" required placeholder="TPE:2330、TSLA、HK:0700、JP:7203"></label>
+        <label>報價代號 <input id="assetQuoteSymbol" placeholder="2330.TW、TSLA、0700.HK、7203.T"></label>
+        <label>名稱 <input id="assetName" required></label>
+        <div class="form-grid">
+          <label>幣別
+            <select id="assetCurrency">
+              <option value="TWD">TWD</option>
+              <option value="USD">USD</option>
+              <option value="HKD">HKD</option>
+              <option value="JPY">JPY</option>
+            </select>
+          </label>
+          <label>數量 <input id="assetShares" type="number" step="0.000001"></label>
+          <label>平均成本 <input id="assetAvgCost" type="number" step="0.000001"></label>
+          <label>成本 TWD <input id="assetCostBasis" type="number" step="1"></label>
+        </div>
+        <label>備註 <textarea id="assetNotes" rows="3"></textarea></label>
+        <div class="dialog-actions">
+          <button id="cancelAsset" type="button">取消</button>
+          <button class="primary-button">儲存</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="accountDialog">
+      <form id="accountForm" method="dialog">
+        <h2 id="accountDialogTitle">新增資產</h2>
+        <input type="hidden" id="accountId">
+        <div class="form-grid">
+          <label>分類
+            <select id="accountGroup">
+              <option>現金存款</option>
+              <option>基金</option>
+              <option>證券</option>
+              <option>加密貨幣</option>
+              <option>房屋資產</option>
+              <option>股權</option>
+              <option>斜槓資本</option>
+              <option>負債</option>
+            </select>
+          </label>
+          <label>幣別
+            <select id="accountCurrency">
+              <option value="TWD">TWD</option>
+              <option value="USD">USD</option>
+              <option value="HKD">HKD</option>
+              <option value="JPY">JPY</option>
+            </select>
+          </label>
+        </div>
+        <label>名稱 <input id="accountName" required></label>
+        <div class="form-grid">
+          <label>原幣金額 <input id="accountAmount" type="number" step="0.01"></label>
+          <label>折合 TWD <input id="accountValueTwd" type="number" step="1"></label>
+        </div>
+        <label>備註 <textarea id="accountNotes" rows="3"></textarea></label>
+        <div class="dialog-actions">
+          <button id="cancelAccount" type="button">取消</button>
+          <button class="primary-button">儲存</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
