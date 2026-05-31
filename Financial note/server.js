@@ -162,6 +162,8 @@ async function fetchYahooQuotes(symbols) {
       price,
       change,
       changePct: change != null && previous ? change / previous : null,
+      previousClose: previous,
+      marketState: meta.marketState || "",
       currency: meta.currency || "",
       marketTime: meta.regularMarketTime ? new Date(meta.regularMarketTime * 1000).toISOString() : null,
       provider: "Yahoo Finance Chart"

@@ -43,6 +43,31 @@ const trendSeriesMeta = [
   { key: "liabilities", label: "負債", color: colors.liabilities, width: 3 }
 ];
 
+const tradingViewLogoSlugs = {
+  TSLA: "tesla",
+  RKLB: "rocket-lab",
+  GOOGL: "alphabet",
+  NVDA: "nvidia",
+  AMZN: "amazon",
+  ASTS: "ast-spacemobile",
+  CRCL: "circle",
+  GRAB: "grab",
+  NVO: "novo-nordisk",
+  UNCY: "unicycive-therapeutics",
+  PL: "planet-labs",
+  VTI: "vanguard",
+  ITOT: "blackrock",
+  QYLD: "global-x",
+  SCHD: "schwab",
+  TSLY: "yieldmax",
+  "TPE:2330": "taiwan-semiconductor",
+  "TPE:2002": "china-steel",
+  "TPE:2301": "lite-on-technology",
+  "TPE:2317": "hon-hai",
+  "CURRENCY:BTC/USD": "crypto/XTVCBTC",
+  "BTC-USD": "crypto/XTVCBTC"
+};
+
 const netWorthCategoryMeta = [
   ["cash", "現金", "cash"],
   ["funds", "基金", "fund"],
@@ -113,6 +138,11 @@ function assetChangePct(asset) {
   return quote?.changePct ?? asset.dayChangePct ?? 0;
 }
 
+function assetPreviousPrice(asset) {
+  const quote = state.quotes.get(asset.quoteSymbol);
+  return quote?.previousClose ?? (assetPrice(asset) - assetUnitChange(asset));
+}
+
 function currencyCode(asset) {
   return asset.currency || (asset.market === "TW" ? "TWD" : "USD");
 }
@@ -148,6 +178,11 @@ function logoColor(asset) {
   const palette = ["#10231f", "#1f7a5a", "#3b6ea8", "#b8832f", "#7564a8", "#b94d63"];
   const seed = [...String(asset.symbol)].reduce((sum, char) => sum + char.charCodeAt(0), 0);
   return palette[seed % palette.length];
+}
+
+function tradingViewLogoUrl(asset) {
+  const slug = tradingViewLogoSlugs[asset.symbol] || tradingViewLogoSlugs[asset.quoteSymbol] || tradingViewLogoSlugs[String(asset.symbol || "").replace(/^TPE:/, "")];
+  return slug ? `https://s3-symbol-logo.tradingview.com/${slug}.svg` : "";
 }
 
 function categoryValue(key) {
@@ -416,12 +451,16 @@ function drawAccountRecordCharts() {
 function renderInvestments() {
   const assets = visibleInvestments();
   const total = assets.reduce((sum, asset) => sum + assetValue(asset), 0);
-  const dayChange = assets.reduce((sum, asset) => sum + assetDayChange(asset), 0);
-  const previous = total - dayChange;
-  const dayPct = previous ? dayChange / previous : 0;
+  const portfolioAssets = state.portfolio.assets.filter((asset) => asset.isInvestment !== false && (Number(asset.shares || 0) !== 0 || state.showZero));
+  const portfolioTotal = portfolioAssets.reduce((sum, asset) => sum + assetValue(asset), 0);
+  const portfolioPrevious = portfolioAssets.reduce((sum, asset) => {
+    return sum + Number(asset.shares || 0) * Number(assetPreviousPrice(asset) || 0) * fxToTwd(asset.currency || "TWD");
+  }, 0);
+  const dayChange = portfolioTotal - portfolioPrevious;
+  const dayPct = portfolioPrevious ? dayChange / portfolioPrevious : 0;
   renderInvestmentChart(assets, total);
   $("#investmentCount").textContent = `${assets.length} 筆 / ${fmtMoney(total)}`;
-  renderPortfolioQuoteSummary(total, dayChange, dayPct);
+  renderPortfolioQuoteSummary(portfolioTotal, dayChange, dayPct);
   $("#txAsset").innerHTML = state.portfolio.assets
     .filter((asset) => asset.isInvestment !== false)
     .map((asset) => `<option value="${escapeHtml(asset.id)}">${escapeHtml(asset.symbol)} ${escapeHtml(asset.name)}</option>`)
@@ -433,10 +472,14 @@ function renderInvestments() {
     const changePct = assetChangePct(asset);
     const changeClass = classFor(unitChange);
     const currency = currencyCode(asset);
+    const logoUrl = tradingViewLogoUrl(asset);
+    const quote = state.quotes.get(asset.quoteSymbol);
     return `
       <article class="quote-row">
         <div class="quote-main">
-          <div class="quote-logo" style="background:${logoColor(asset)}">${escapeHtml(logoText(asset))}</div>
+          <div class="quote-logo" style="background:${logoColor(asset)}">
+            ${logoUrl ? `<img src="${escapeHtml(logoUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove(); this.parentElement.dataset.fallback='${escapeHtml(logoText(asset))}'">` : escapeHtml(logoText(asset))}
+          </div>
           <div class="quote-title">
             <strong>${escapeHtml(quoteDisplayName(asset))}</strong>
             <span>${escapeHtml(quoteSubName(asset))} · ${escapeHtml(asset.market || asset.exchange || "")}</span>
@@ -448,7 +491,7 @@ function renderInvestments() {
         <div class="quote-cell"><strong>${fmtMoney(value)}</strong><span>現值</span></div>
         <div class="quote-cell quote-change ${changeClass}">
           <strong>${unitChange >= 0 ? "+" : ""}${formatPriceByCurrency(unitChange, currency)}</strong>
-          <span>${changePct >= 0 ? "+" : ""}${pct.format(changePct)}</span>
+          <span>${changePct >= 0 ? "+" : ""}${pct.format(changePct)}${quote?.marketTime ? ` · ${new Date(quote.marketTime).toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" })}` : ""}</span>
         </div>
         <div class="row-actions">
           <button title="編輯" data-edit-asset="${escapeHtml(asset.id)}">✎</button>
