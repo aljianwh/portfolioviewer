@@ -1,4 +1,4 @@
-const CACHE_NAME = "financial-portfolio-v6";
+const CACHE_NAME = "financial-portfolio-v7";
 const APP_SHELL = [
   "/",
   "/index.html",

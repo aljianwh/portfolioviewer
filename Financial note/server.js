@@ -4,6 +4,7 @@ import { existsSync, createReadStream } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { importWorkbookData } from "./scripts/xlsx-importer.js";
+import { appendTransactionRecord, writeAccountRecord } from "./scripts/xlsx-editor.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataPath = path.join(__dirname, "data", "portfolio-data.json");
@@ -143,6 +144,21 @@ function normalizeHistory(input, existingHistory = []) {
   row.mom = prev?.netWorth ? (row.netWorth - Number(prev.netWorth)) / Number(prev.netWorth) : 0;
   row.yoy = lastYear?.netWorth ? (row.netWorth - Number(lastYear.netWorth)) / Number(lastYear.netWorth) : 0;
   return row;
+}
+
+function latestPortfolioMonth(portfolio) {
+  return portfolio.history?.at(-1)?.month || new Date().toISOString().slice(0, 7);
+}
+
+function upsertAccountRecord(account, record) {
+  const records = Array.isArray(account.records) ? account.records.filter((entry) => entry.month !== record.month) : [];
+  records.push(record);
+  records.sort((a, b) => String(a.month).localeCompare(String(b.month)));
+  return { ...account, amount: record.amount, valueTwd: record.valueTwd, records };
+}
+
+function linkedWorkbookAccount(accountId) {
+  return /-\d+$/.test(String(accountId || ""));
 }
 
 async function fetchYahooQuotes(symbols) {
@@ -300,8 +316,15 @@ async function handleApi(req, res, url) {
 
   if (url.pathname === "/api/accounts" && req.method === "POST") {
     const account = normalizeAccount(await readBody(req));
+    const record = normalizeAccountRecord({
+      month: latestPortfolioMonth(portfolio),
+      amount: account.amount,
+      valueTwd: account.valueTwd
+    });
+    const nextAccount = upsertAccountRecord(account, record);
+    if (linkedWorkbookAccount(nextAccount.id)) await writeAccountRecord(workbookPath, nextAccount.id, record);
     portfolio.accounts = (portfolio.accounts || []).filter((item) => item.id !== account.id);
-    portfolio.accounts.push(account);
+    portfolio.accounts.push(nextAccount);
     sendJson(res, 200, await savePortfolio(portfolio));
     return;
   }
@@ -311,7 +334,14 @@ async function handleApi(req, res, url) {
     const id = decodeURIComponent(accountMatch[1]);
     const previous = (portfolio.accounts || []).find((item) => item.id === id);
     const account = normalizeAccount({ ...(await readBody(req)), id, records: previous?.records || [] });
-    portfolio.accounts = (portfolio.accounts || []).map((item) => (item.id === id ? account : item));
+    const record = normalizeAccountRecord({
+      month: latestPortfolioMonth(portfolio),
+      amount: account.amount,
+      valueTwd: account.valueTwd
+    });
+    const nextAccount = upsertAccountRecord(account, record);
+    if (linkedWorkbookAccount(id)) await writeAccountRecord(workbookPath, id, record);
+    portfolio.accounts = (portfolio.accounts || []).map((item) => (item.id === id ? nextAccount : item));
     sendJson(res, 200, await savePortfolio(portfolio));
     return;
   }
@@ -331,12 +361,10 @@ async function handleApi(req, res, url) {
     portfolio.accounts = (portfolio.accounts || []).map((item) => {
       if (item.id !== id) return item;
       found = true;
-      const records = Array.isArray(item.records) ? item.records.filter((entry) => entry.month !== record.month) : [];
-      records.push(record);
-      records.sort((a, b) => String(a.month).localeCompare(String(b.month)));
-      return { ...item, amount: record.amount, valueTwd: record.valueTwd, records };
+      return upsertAccountRecord(item, record);
     });
     if (!found) throw new Error("Account not found");
+    if (linkedWorkbookAccount(id)) await writeAccountRecord(workbookPath, id, record);
     sendJson(res, 200, await savePortfolio(portfolio));
     return;
   }
@@ -371,7 +399,8 @@ async function handleApi(req, res, url) {
     const input = await readBody(req);
     const asset = (portfolio.assets || []).find((item) => item.id === input.assetId);
     const shares = Number(input.shares || 0);
-    portfolio.transactions.push({
+    if (!asset) throw new Error("Asset not found");
+    const transaction = {
       id: input.id || `tx-${Date.now()}`,
       assetId: input.assetId,
       date: input.date || new Date().toISOString().slice(0, 10),
@@ -381,7 +410,9 @@ async function handleApi(req, res, url) {
       cost: Number(input.cost || 0),
       kind: input.kind || (shares >= 0 ? "buy" : "sell"),
       investmentType: asset?.investmentType || asset?.type || "stock"
-    });
+    };
+    await appendTransactionRecord(workbookPath, asset, transaction);
+    portfolio.transactions.push(transaction);
     sendJson(res, 200, await savePortfolio(portfolio));
     return;
   }

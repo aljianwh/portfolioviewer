@@ -185,6 +185,15 @@ function tradingViewLogoUrl(asset) {
   return slug ? `https://s3-symbol-logo.tradingview.com/${slug}.svg` : "";
 }
 
+function quoteTimeLabel(value) {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed.toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" });
+  }
+  return String(value).replace(/^Closed:\s*/, "").split("·")[0].trim();
+}
+
 function categoryValue(key) {
   const latest = latestHistory();
   return Number(latest[key] || 0);
@@ -468,6 +477,7 @@ function renderInvestments() {
   $("#holdingsBody").innerHTML = assets.map((asset) => {
     const value = assetValue(asset);
     const pnl = value - Number(asset.costBasisTwd || 0);
+    const weight = portfolioTotal ? value / portfolioTotal : 0;
     const unitChange = assetUnitChange(asset);
     const changePct = assetChangePct(asset);
     const changeClass = classFor(unitChange);
@@ -489,9 +499,11 @@ function renderInvestments() {
         <div class="quote-cell"><strong>${fmtNumber(asset.shares)}</strong><span>持有</span></div>
         <div class="quote-cell"><strong>${formatPriceByCurrency(assetPrice(asset), currency)}</strong><span>現價</span></div>
         <div class="quote-cell"><strong>${fmtMoney(value)}</strong><span>現值</span></div>
+        <div class="quote-cell"><strong class="${classFor(pnl)}">${pnl >= 0 ? "+" : ""}${fmtMoney(pnl)}</strong><span>即時損益</span></div>
+        <div class="quote-cell"><strong>${pct.format(weight)}</strong><span>投資占比</span></div>
         <div class="quote-cell quote-change ${changeClass}">
           <strong>${unitChange >= 0 ? "+" : ""}${formatPriceByCurrency(unitChange, currency)}</strong>
-          <span>${changePct >= 0 ? "+" : ""}${pct.format(changePct)}${quote?.marketTime ? ` · ${new Date(quote.marketTime).toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" })}` : ""}</span>
+          <span>${changePct >= 0 ? "+" : ""}${pct.format(changePct)}${quote?.marketTime ? ` · ${quoteTimeLabel(quote.marketTime)}` : ""}</span>
         </div>
         <div class="row-actions">
           <button title="編輯" data-edit-asset="${escapeHtml(asset.id)}">✎</button>
