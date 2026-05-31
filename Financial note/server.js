@@ -172,6 +172,105 @@ async function fetchYahooQuotes(symbols) {
   return results.filter(Boolean);
 }
 
+function decodeHtml(value = "") {
+  return value
+    .replace(/&nbsp;/g, " ")
+    .replace(/&middot;/g, "·")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/g, "\"");
+}
+
+function parseNumber(value = "") {
+  const normalized = decodeHtml(value)
+    .replace(/[,$NT％%+\s]/g, "")
+    .replace(/[−–—]/g, "-");
+  const number = Number(normalized);
+  return Number.isFinite(number) ? number : null;
+}
+
+function googleCandidates(symbol) {
+  if (symbol.endsWith(".TW")) return [`${symbol.replace(".TW", "")}:TPE`];
+  if (symbol.endsWith(".HK")) return [`${symbol.replace(".HK", "").padStart(4, "0")}:HKG`];
+  if (symbol.endsWith(".T")) return [`${symbol.replace(".T", "")}:TYO`];
+  if (symbol === "BTC-USD") return ["BTC-USD"];
+  if (symbol === "USDTWD=X" || symbol === "HKDTWD=X" || symbol === "JPYTWD=X") return [];
+  const code = symbol.replace(/[-.].*$/, "");
+  const exchangeHints = {
+    VTI: "NYSEARCA",
+    ITOT: "NYSEARCA",
+    SCHD: "NYSEARCA",
+    TSLY: "NYSEARCA",
+    NVO: "NYSE",
+    CRCL: "NYSE",
+    PL: "NYSE"
+  };
+  return [
+    `${code}:${exchangeHints[code] || "NASDAQ"}`,
+    `${code}:NYSE`,
+    `${code}:NYSEARCA`,
+    code
+  ];
+}
+
+function parseGoogleQuote(html, originalSymbol, googleSymbol) {
+  const nameIndex = html.lastIndexOf("<div class=\"gO24Ff\">");
+  const blockStart = html.indexOf("<div class=\"LhDNu\">", Math.max(0, nameIndex));
+  if (blockStart < 0) return null;
+  const block = html.slice(blockStart, blockStart + 1800);
+  const priceText = block.match(/<span jsname="Pdsbrc"[^>]*>\s*<span>([\s\S]*?)<\/span>/)?.[1];
+  const pctText = block.match(/<span jsname="vY9t3b"[^>]*>\s*<span[^>]*>([\s\S]*?)<\/span>/)?.[1];
+  const changeText = block.match(/<span class="wBomed">\(\s*<span jsname="xnruHf"[^>]*>\s*<span>([\s\S]*?)<\/span>/)?.[1];
+  const metaText = decodeHtml(block.match(/<div class="jZZ2de">([\s\S]*?)<\/div>/)?.[1] || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  const price = parseNumber(priceText);
+  const change = parseNumber(changeText);
+  const changePct = parseNumber(pctText);
+  if (price == null || change == null || changePct == null) return null;
+  const currency = metaText.match(/·\s*([A-Z]{3})\b/)?.[1]
+    || (originalSymbol.endsWith(".TW") ? "TWD" : originalSymbol.endsWith(".HK") ? "HKD" : originalSymbol.endsWith(".T") ? "JPY" : originalSymbol === "BTC-USD" ? "USD" : "USD");
+  const previousClose = price - change;
+  return {
+    quoteSymbol: originalSymbol,
+    googleSymbol,
+    price,
+    change,
+    changePct: changePct / 100,
+    previousClose,
+    marketState: metaText.includes("Closed") ? "CLOSED" : "",
+    currency,
+    marketTime: metaText || null,
+    provider: "Google Finance"
+  };
+}
+
+async function fetchGoogleQuotes(symbols) {
+  const results = [];
+  for (const symbol of symbols) {
+    const candidates = googleCandidates(symbol);
+    let quote = null;
+    for (const googleSymbol of candidates) {
+      const url = `https://www.google.com/finance/quote/${encodeURIComponent(googleSymbol)}?hl=en`;
+      const response = await fetch(url, { headers: { "user-agent": "Mozilla/5.0" } });
+      if (!response.ok) continue;
+      quote = parseGoogleQuote(await response.text(), symbol, googleSymbol);
+      if (quote) break;
+    }
+    if (quote) results.push(quote);
+  }
+  return results;
+}
+
+async function fetchQuotes(symbols) {
+  const unique = [...new Set(symbols)];
+  const googleQuotes = await fetchGoogleQuotes(unique);
+  const found = new Set(googleQuotes.map((quote) => quote.quoteSymbol));
+  const missing = unique.filter((symbol) => !found.has(symbol));
+  const yahooQuotes = missing.length ? await fetchYahooQuotes(missing) : [];
+  return [...googleQuotes, ...yahooQuotes];
+}
+
 async function handleApi(req, res, url) {
   const portfolio = await readPortfolio();
 
@@ -291,7 +390,7 @@ async function handleApi(req, res, url) {
     const symbols = (url.searchParams.get("symbols") || "").split(",").map((s) => s.trim()).filter(Boolean);
     const withFx = [...new Set([...symbols, "USDTWD=X", "HKDTWD=X", "JPYTWD=X"])];
     try {
-      sendJson(res, 200, { quotes: await fetchYahooQuotes(withFx), fetchedAt: new Date().toISOString() });
+      sendJson(res, 200, { quotes: await fetchQuotes(withFx), fetchedAt: new Date().toISOString() });
     } catch (error) {
       sendJson(res, 200, { quotes: [], fetchedAt: new Date().toISOString(), warning: error.message });
     }
