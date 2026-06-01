@@ -389,14 +389,23 @@ function accountCardHtml(account) {
             <input name="amount" type="number" step="0.01" value="${Number(latest.amount || account.amount || 0)}" placeholder="原幣金額">
             <input name="valueTwd" type="number" step="1" value="${Number(latest.valueTwd || account.valueTwd || 0)}" placeholder="折合 TWD">
             <button class="primary-button">更新</button>
+            <span class="record-status" data-record-status="${escapeHtml(account.id)}"></span>
           </form>
           <canvas class="account-chart" data-account-chart="${escapeHtml(account.id)}" width="520" height="180"></canvas>
         </div>
         <div class="records-table">
           <table>
-            <thead><tr><th>月份</th><th>金額</th><th>折合 TWD</th></tr></thead>
+            <thead><tr><th>月份</th><th>金額</th><th>折合 TWD</th><th>復原</th></tr></thead>
             <tbody>
-              ${records.map((record) => `<tr><td>${escapeHtml(record.month)}</td><td>${fmtNumber(record.amount)}</td><td>${fmtMoney(record.valueTwd)}</td></tr>`).join("")}
+              ${records.map((record) => {
+                const revision = Array.isArray(record.revisions) ? record.revisions.at(-1) : null;
+                return `<tr>
+                  <td>${escapeHtml(record.month)}</td>
+                  <td>${fmtNumber(record.amount)}</td>
+                  <td>${fmtMoney(record.valueTwd)}</td>
+                  <td>${revision ? `<button class="text-button" data-restore-account="${escapeHtml(account.id)}" data-month="${escapeHtml(revision.month)}" data-amount="${Number(revision.amount || 0)}" data-value-twd="${Number(revision.valueTwd || 0)}">還原前值</button>` : `<button class="text-button" data-fill-record="${escapeHtml(account.id)}" data-month="${escapeHtml(record.month)}" data-amount="${Number(record.amount || 0)}" data-value-twd="${Number(record.valueTwd || 0)}">帶入</button>`}</td>
+                </tr>`;
+              }).join("")}
             </tbody>
           </table>
         </div>
@@ -844,6 +853,35 @@ function accountFromForm() {
   };
 }
 
+async function submitAccountRecord(id, payload, form = null) {
+  const status = form?.querySelector(".record-status")
+    || $("[data-record-status]") && $$("[data-record-status]").find((item) => item.dataset.recordStatus === id);
+  const button = form?.querySelector("button");
+  if (status) {
+    status.textContent = "更新中...";
+    status.className = "record-status";
+  }
+  if (button) button.disabled = true;
+  try {
+    state.portfolio = await api(`/api/accounts/${encodeURIComponent(id)}/records`, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    renderAssets();
+    renderOverview();
+    renderTrends();
+  } catch (error) {
+    if (status) {
+      status.textContent = error.message || "更新失敗，請確認 Excel 是否已關閉";
+      status.className = "record-status error";
+    } else {
+      alert(error.message || "更新失敗，請確認 Excel 是否已關閉");
+    }
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
 function wireEvents() {
   $("#refreshQuotes").addEventListener("click", () => refreshQuotes());
   $("#exportData").addEventListener("click", () => {
@@ -927,6 +965,26 @@ function wireEvents() {
     const toggleId = event.target.closest("[data-toggle-account]")?.dataset.toggleAccount;
     const editId = event.target.closest("[data-edit-account]")?.dataset.editAccount;
     const deleteId = event.target.closest("[data-delete-account]")?.dataset.deleteAccount;
+    const fillButton = event.target.closest("[data-fill-record]");
+    const restoreButton = event.target.closest("[data-restore-account]");
+    if (fillButton || restoreButton) {
+      const button = fillButton || restoreButton;
+      const id = button.dataset.fillRecord || button.dataset.restoreAccount;
+      const card = button.closest("[data-account-card]");
+      const form = card?.querySelector("[data-account-record-form]");
+      if (!form) return;
+      form.elements.month.value = button.dataset.month || "";
+      form.elements.amount.value = button.dataset.amount || 0;
+      form.elements.valueTwd.value = button.dataset.valueTwd || 0;
+      if (restoreButton) {
+        await submitAccountRecord(id, {
+          month: button.dataset.month,
+          amount: button.dataset.amount,
+          valueTwd: button.dataset.valueTwd
+        }, form);
+      }
+      return;
+    }
     if (toggleId) {
       const card = event.target.closest("[data-account-card]");
       const detail = card?.querySelector(".account-detail");
@@ -949,16 +1007,11 @@ function wireEvents() {
     event.preventDefault();
     const id = form.dataset.accountRecordForm;
     const data = new FormData(form);
-    state.portfolio = await api(`/api/accounts/${encodeURIComponent(id)}/records`, {
-      method: "POST",
-      body: JSON.stringify({
-        month: data.get("month"),
-        amount: data.get("amount"),
-        valueTwd: data.get("valueTwd")
-      })
-    });
-    renderAssets();
-    renderOverview();
+    await submitAccountRecord(id, {
+      month: data.get("month"),
+      amount: data.get("amount"),
+      valueTwd: data.get("valueTwd")
+    }, form);
   });
 
   $("#assetForm").addEventListener("submit", async (event) => {

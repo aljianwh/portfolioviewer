@@ -7,10 +7,10 @@ import { importWorkbookData } from "./scripts/xlsx-importer.js";
 import { appendTransactionRecord, writeAccountRecord } from "./scripts/xlsx-editor.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dataPath = path.join(__dirname, "data", "portfolio-data.json");
+const dataPath = process.env.PORTFOLIO_DATA_PATH || path.join(__dirname, "data", "portfolio-data.json");
 const publicDir = path.join(__dirname, "public");
 const port = Number(process.env.PORT || 4173);
-const workbookPath = path.join(__dirname, "Financial Portfolio .xlsx");
+const workbookPath = process.env.PORTFOLIO_WORKBOOK_PATH || path.join(__dirname, "Financial Portfolio .xlsx");
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -151,8 +151,20 @@ function latestPortfolioMonth(portfolio) {
 }
 
 function upsertAccountRecord(account, record) {
-  const records = Array.isArray(account.records) ? account.records.filter((entry) => entry.month !== record.month) : [];
-  records.push(record);
+  const currentRecords = Array.isArray(account.records) ? account.records : [];
+  const previous = currentRecords.find((entry) => entry.month === record.month);
+  const records = currentRecords.filter((entry) => entry.month !== record.month);
+  const revisions = Array.isArray(previous?.revisions) ? [...previous.revisions] : [];
+  if (previous && (Number(previous.amount || 0) !== record.amount || Number(previous.valueTwd || 0) !== record.valueTwd)) {
+    revisions.push({
+      date: previous.date,
+      month: previous.month,
+      amount: Number(previous.amount || 0),
+      valueTwd: Number(previous.valueTwd || 0),
+      restoredAt: new Date().toISOString()
+    });
+  }
+  records.push({ ...record, revisions: revisions.slice(-12) });
   records.sort((a, b) => String(a.month).localeCompare(String(b.month)));
   return { ...account, amount: record.amount, valueTwd: record.valueTwd, records };
 }
